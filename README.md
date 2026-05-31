@@ -1,58 +1,94 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Cartlex Fleet Partner Portal
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+The official fleet investment, asset management, and rider verification platform for **Cartlex** delivery partners — built with Laravel 13, Tailwind CSS v4, and Alpine.js.
 
-## About Laravel
+---
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## 🚀 Deploy to Render (Free — get a live URL)
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+1. Go to **[render.com](https://render.com)** and create a free account
+2. Click **New → Web Service**
+3. Connect your GitHub account and select the **`Limitlexng/BEXX`** repository
+4. Render auto-detects the `render.yaml` — click **Apply**
+5. Wait ~5 minutes for the build
+6. Your live URL will be: `https://cartlex-fleet-portal.onrender.com`
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+> **Note:** On the free tier Render spins down after 15 min of inactivity. First request may take ~30s to wake up.
 
-## Learning Laravel
+---
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Demo Credentials
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+| Role | Email | Password |
+|---|---|---|
+| **Super Admin** | `admin@gocartlex.com` | `Cartlex@2025!` |
+| **Finance Admin** | `finance@gocartlex.com` | `Cartlex@2025!` |
+| **Demo Partner** | `demo@partner.com` | `Demo@2025!` |
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+---
 
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Local Development
 
 ```bash
-composer require laravel/boost --dev
+# Clone and install
+composer install
+npm install
 
-php artisan boost:install
+# Environment
+cp .env.example .env
+php artisan key:generate
+touch database/database.sqlite
+
+# Migrate and seed
+php artisan migrate --seed
+
+# Build assets and serve
+npm run build
+php artisan serve
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Open [http://localhost:8000](http://localhost:8000)
 
-## Contributing
+### With Docker
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+docker-compose up
+```
 
-## Code of Conduct
+Open [http://localhost:8080](http://localhost:8080)
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+---
 
-## Security Vulnerabilities
+## Tech Stack
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+- **Laravel 13** (PHP 8.4)
+- **Tailwind CSS v4** + Alpine.js
+- **SQLite** (zero-config, swappable to MySQL/PostgreSQL)
+- **Spatie Permission** — role-based access control
+- **Chart.js** — earnings trend charts
+- **QR Code** — rider ID card verification
 
-## License
+---
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Portal Modules
+
+| Module | Description |
+|---|---|
+| Fleet Registry | Register motorcycles, track health, insurance, and ROI |
+| Rider Management | Create riders, generate QR ID cards, track performance |
+| Rider Verification | Public page at `/verify/rider/{cardNumber}` |
+| Earnings Dashboard | Daily/weekly/monthly/yearly revenue per asset & rider |
+| Maintenance | Service logs, cost tracking, upcoming schedules |
+| Compliance | License, insurance, road worthiness monitoring |
+| Wallet & Withdrawals | Balance, transactions, payout requests |
+| Admin Portal | Partner approval, earnings upload, withdrawal management |
+| Documents | Upload and manage fleet documents |
+| Reports | Printable fleet and earnings reports |
+
+---
+
+## Contact
+
+- 📞 07052004934
+- 📧 help@gocartlex.com
+- 🌐 gocartlex.com
