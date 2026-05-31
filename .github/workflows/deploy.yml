@@ -4,11 +4,6 @@ on:
   push:
     branches: [main, master]
   workflow_dispatch:
-    inputs:
-      force_seed:
-        description: 'Force re-seed database (wipes existing data)'
-        required: false
-        default: 'false'
 
 jobs:
   build-and-deploy:
@@ -38,7 +33,7 @@ jobs:
 
       - name: Create deployment archive
         run: |
-          tar -czf /tmp/cartlex_deploy.tar.gz \
+          tar -czf cartlex_deploy.tar.gz \
             --exclude='.git' \
             --exclude='node_modules' \
             --exclude='tests' \
@@ -47,15 +42,15 @@ jobs:
             --exclude='*.log' \
             .
 
-      - name: Upload archive & deploy
+      - name: Upload archive via SCP
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           port: ${{ secrets.SSH_PORT }}
           username: ${{ secrets.SSH_USER }}
           password: ${{ secrets.SSH_PASS }}
-          source: /tmp/cartlex_deploy.tar.gz
-          target: ~/
+          source: "cartlex_deploy.tar.gz"
+          target: "~/"
 
       - name: Run remote setup
         uses: appleboy/ssh-action@v1.2.0
@@ -68,6 +63,8 @@ jobs:
             set -e
             APP_DIR="$HOME/cartlex_app"
             PUBLIC_HTML="$HOME/public_html"
+            DOMAIN="${{ secrets.DOMAIN }}"
+            APP_URL="https://$DOMAIN"
 
             # Extract deployment archive
             mkdir -p "$APP_DIR"
@@ -76,49 +73,43 @@ jobs:
 
             cd "$APP_DIR"
 
-            # Write .env on first deploy
+            # Write .env on first deploy only
             if [ ! -f .env ]; then
-              cat > .env <<ENVEOF
-            APP_NAME="Cartlex Fleet Portal"
-            APP_ENV=production
-            APP_KEY=
-            APP_DEBUG=false
-            APP_URL=https://${{ secrets.DOMAIN }}
-            APP_LOCALE=en
-            APP_FALLBACK_LOCALE=en
-
-            DB_CONNECTION=sqlite
-            DB_DATABASE=$HOME/cartlex_app/database/database.sqlite
-
-            SESSION_DRIVER=file
-            CACHE_STORE=file
-            QUEUE_CONNECTION=sync
-            FILESYSTEM_DISK=local
-
-            LOG_CHANNEL=single
-            LOG_LEVEL=error
-
-            MAIL_MAILER=log
-            MAIL_FROM_ADDRESS="noreply@gocartlex.com"
-            MAIL_FROM_NAME="Cartlex"
-            ENVEOF
+              printf 'APP_NAME="Cartlex Fleet Portal"\n' > .env
+              printf 'APP_ENV=production\n' >> .env
+              printf 'APP_KEY=\n' >> .env
+              printf 'APP_DEBUG=false\n' >> .env
+              printf "APP_URL=%s\n" "$APP_URL" >> .env
+              printf 'APP_LOCALE=en\n' >> .env
+              printf '\n' >> .env
+              printf 'DB_CONNECTION=sqlite\n' >> .env
+              printf "DB_DATABASE=%s/database/database.sqlite\n" "$APP_DIR" >> .env
+              printf '\n' >> .env
+              printf 'SESSION_DRIVER=file\n' >> .env
+              printf 'CACHE_STORE=file\n' >> .env
+              printf 'QUEUE_CONNECTION=sync\n' >> .env
+              printf 'FILESYSTEM_DISK=local\n' >> .env
+              printf '\n' >> .env
+              printf 'LOG_CHANNEL=single\n' >> .env
+              printf 'LOG_LEVEL=error\n' >> .env
+              printf '\n' >> .env
+              printf 'MAIL_MAILER=log\n' >> .env
+              printf 'MAIL_FROM_ADDRESS="noreply@gocartlex.com"\n' >> .env
+              printf 'MAIL_FROM_NAME="Cartlex"\n' >> .env
               php artisan key:generate --force
             fi
 
-            # Ensure SQLite DB exists with correct permissions
+            # Database
             touch database/database.sqlite
             chmod 664 database/database.sqlite
-
-            # Storage & cache permissions
             chmod -R 775 storage bootstrap/cache
 
-            # Run migrations
+            # Migrations
             php artisan migrate --force --no-interaction
 
-            # Seed only if no users yet
-            USER_COUNT=$(php artisan tinker --execute="echo \App\Models\User::count();" 2>/dev/null | grep -o '[0-9]*' | tail -1)
+            # Seed once
+            USER_COUNT=$(php artisan tinker --execute="echo App\Models\User::count();" 2>/dev/null | grep -o '[0-9]*' | tail -1)
             if [ -z "$USER_COUNT" ] || [ "$USER_COUNT" = "0" ]; then
-              echo "Seeding database..."
               php artisan db:seed --force --no-interaction
             fi
 
@@ -128,32 +119,25 @@ jobs:
             php artisan view:cache
             php artisan storage:link --force 2>/dev/null || true
 
-            # ---- Wire up public_html ----
-            # Write a patched index.php with absolute paths baked in
-            ABSOLUTE_APP="$HOME/cartlex_app"
-            cat > "$PUBLIC_HTML/index.php" <<PHPEOF
-<?php
-use Illuminate\\Foundation\\Application;
-use Illuminate\\Http\\Request;
-define('LARAVEL_START', microtime(true));
-if (file_exists(\$maintenance = '${ABSOLUTE_APP}/storage/framework/maintenance.php')) {
-    require \$maintenance;
-}
-require '${ABSOLUTE_APP}/vendor/autoload.php';
-/** @var Application \$app */
-\$app = require_once '${ABSOLUTE_APP}/bootstrap/app.php';
-\$app->handleRequest(Request::capture());
-PHPEOF
+            # ── Wire up public_html ──
+            # Use PHP to patch index.php (avoids shell escaping issues)
+            php -r "
+              \$src  = file_get_contents('${APP_DIR}/public/index.php');
+              \$from = [\"__DIR__.'/../vendor/autoload.php'\", \"__DIR__.'/../bootstrap/app.php'\", \"__DIR__.'/../storage/framework/maintenance.php'\"];
+              \$to   = [\"'${APP_DIR}/vendor/autoload.php'\", \"'${APP_DIR}/bootstrap/app.php'\", \"'${APP_DIR}/storage/framework/maintenance.php'\"];
+              file_put_contents('${PUBLIC_HTML}/index.php', str_replace(\$from, \$to, \$src));
+              echo 'index.php patched\n';
+            "
 
-            # Copy .htaccess
+            # .htaccess
             cp public/.htaccess "$PUBLIC_HTML/.htaccess" 2>/dev/null || true
 
-            # Sync compiled assets
-            rsync -a --delete public/build/ "$PUBLIC_HTML/build/"
+            # Copy built assets (no rsync needed — cp works everywhere)
+            cp -rf public/build "$PUBLIC_HTML/"
 
-            # Sync public storage
+            # Public storage files
             if [ -d storage/app/public ]; then
-              rsync -a storage/app/public/ "$PUBLIC_HTML/storage/"
+              cp -rf storage/app/public "$PUBLIC_HTML/storage"
             fi
 
-            echo "✓ Cartlex deployed successfully"
+            echo "Deploy complete at $APP_URL"
