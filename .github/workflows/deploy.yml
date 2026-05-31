@@ -1,0 +1,143 @@
+name: Deploy to Shared Hosting
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: pdo, pdo_sqlite, mbstring, zip, gd
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install PHP dependencies
+        run: composer install --no-dev --optimize-autoloader --no-interaction
+
+      - name: Build frontend assets
+        run: npm ci && npm run build
+
+      - name: Create deployment archive
+        run: |
+          tar -czf /tmp/cartlex_deploy.tar.gz \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='tests' \
+            --exclude='.github' \
+            --exclude='.env' \
+            --exclude='*.log' \
+            .
+
+      - name: Upload archive & deploy
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASS }}
+          source: /tmp/cartlex_deploy.tar.gz
+          target: ~/
+
+      - name: Run remote setup
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASS }}
+          script: |
+            set -e
+            APP_DIR="$HOME/cartlex_app"
+            PUBLIC_HTML="$HOME/public_html"
+
+            # Extract deployment archive
+            mkdir -p "$APP_DIR"
+            tar -xzf ~/cartlex_deploy.tar.gz -C "$APP_DIR"
+            rm ~/cartlex_deploy.tar.gz
+
+            cd "$APP_DIR"
+
+            # Write .env on first deploy
+            if [ ! -f .env ]; then
+              cat > .env <<ENVEOF
+            APP_NAME="Cartlex Fleet Portal"
+            APP_ENV=production
+            APP_KEY=
+            APP_DEBUG=false
+            APP_URL=https://${{ secrets.DOMAIN }}
+            APP_LOCALE=en
+            APP_FALLBACK_LOCALE=en
+
+            DB_CONNECTION=sqlite
+            DB_DATABASE=$HOME/cartlex_app/database/database.sqlite
+
+            SESSION_DRIVER=file
+            CACHE_STORE=file
+            QUEUE_CONNECTION=sync
+            FILESYSTEM_DISK=local
+
+            LOG_CHANNEL=single
+            LOG_LEVEL=error
+
+            MAIL_MAILER=log
+            MAIL_FROM_ADDRESS="noreply@gocartlex.com"
+            MAIL_FROM_NAME="Cartlex"
+            ENVEOF
+              php artisan key:generate --force
+            fi
+
+            # Ensure SQLite DB exists with correct permissions
+            touch database/database.sqlite
+            chmod 664 database/database.sqlite
+
+            # Storage & cache permissions
+            chmod -R 775 storage bootstrap/cache
+
+            # Run migrations
+            php artisan migrate --force --no-interaction
+
+            # Seed only if no users yet
+            USER_COUNT=$(php artisan tinker --execute="echo \App\Models\User::count();" 2>/dev/null | grep -o '[0-9]*' | tail -1)
+            if [ -z "$USER_COUNT" ] || [ "$USER_COUNT" = "0" ]; then
+              echo "Seeding database..."
+              php artisan db:seed --force --no-interaction
+            fi
+
+            # Production caches
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
+            php artisan storage:link --force 2>/dev/null || true
+
+            # ---- Wire up public_html ----
+            # Patch index.php to reference app above web root
+            cp public/index.php "$PUBLIC_HTML/index.php"
+            sed -i "s|__DIR__.'/../vendor/autoload.php'|'$HOME/cartlex_app/vendor/autoload.php'|g" "$PUBLIC_HTML/index.php"
+            sed -i "s|__DIR__.'/../bootstrap/app.php'|'$HOME/cartlex_app/bootstrap/app.php'|g" "$PUBLIC_HTML/index.php"
+
+            # Copy .htaccess
+            cp public/.htaccess "$PUBLIC_HTML/.htaccess" 2>/dev/null || true
+
+            # Sync compiled assets
+            rsync -a --delete public/build/ "$PUBLIC_HTML/build/"
+
+            # Sync public storage
+            if [ -d storage/app/public ]; then
+              rsync -a storage/app/public/ "$PUBLIC_HTML/storage/"
+            fi
+
+            echo "✓ Cartlex deployed successfully"
