@@ -2,8 +2,13 @@ name: Deploy to Shared Hosting
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
+    inputs:
+      force_seed:
+        description: 'Force re-seed database (wipes existing data)'
+        required: false
+        default: 'false'
 
 jobs:
   build-and-deploy:
@@ -124,10 +129,21 @@ jobs:
             php artisan storage:link --force 2>/dev/null || true
 
             # ---- Wire up public_html ----
-            # Patch index.php to reference app above web root
-            cp public/index.php "$PUBLIC_HTML/index.php"
-            sed -i "s|__DIR__.'/../vendor/autoload.php'|'$HOME/cartlex_app/vendor/autoload.php'|g" "$PUBLIC_HTML/index.php"
-            sed -i "s|__DIR__.'/../bootstrap/app.php'|'$HOME/cartlex_app/bootstrap/app.php'|g" "$PUBLIC_HTML/index.php"
+            # Write a patched index.php with absolute paths baked in
+            ABSOLUTE_APP="$HOME/cartlex_app"
+            cat > "$PUBLIC_HTML/index.php" <<PHPEOF
+<?php
+use Illuminate\\Foundation\\Application;
+use Illuminate\\Http\\Request;
+define('LARAVEL_START', microtime(true));
+if (file_exists(\$maintenance = '${ABSOLUTE_APP}/storage/framework/maintenance.php')) {
+    require \$maintenance;
+}
+require '${ABSOLUTE_APP}/vendor/autoload.php';
+/** @var Application \$app */
+\$app = require_once '${ABSOLUTE_APP}/bootstrap/app.php';
+\$app->handleRequest(Request::capture());
+PHPEOF
 
             # Copy .htaccess
             cp public/.htaccess "$PUBLIC_HTML/.htaccess" 2>/dev/null || true
