@@ -108,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step === 'install') {
 
     // 2. Composer install
     $log[] = '📚 Installing PHP dependencies (takes ~60s)…';
-    $r = run("cd $appDir && $compBin install --no-dev --optimize-autoloader --no-interaction --no-progress --quiet");
+    $r = run("cd $appDir && $compBin install --no-dev --optimize-autoloader --no-interaction --no-progress --quiet --ignore-platform-reqs");
     if ($r['code'] !== 0) { $error = 'Composer failed: ' . $r['out']; goto done; }
 
     // 3. Write .env
