@@ -1,3 +1,9 @@
+Options -Indexes
+
+<IfModule mod_php.c>
+    php_flag display_errors Off
+</IfModule>
+
 <IfModule mod_rewrite.c>
     <IfModule mod_negotiation.c>
         Options -MultiViews -Indexes
