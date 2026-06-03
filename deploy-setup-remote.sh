@@ -51,9 +51,22 @@ cd "$APP_DIR"
 # ── Composer install via correct PHP ─────────────────────────────
 echo "Installing PHP dependencies..."
 COMPOSER_BIN=$(command -v composer || command -v composer2 || echo composer)
+# Run install; suppress the post-install-cmd error — we re-run it after patching
 "$PHP_BIN" "$COMPOSER_BIN" install \
   --no-dev --optimize-autoloader --no-interaction \
-  --no-progress --ignore-platform-reqs 2>&1 | tail -5
+  --no-progress --ignore-platform-reqs 2>&1 | tail -5 || true
+
+# ── PHP 8.3 compatibility patch ───────────────────────────────────
+# laravel/framework ≥13.12 calls LeagueUri::new() which is PHP 8.4 syntax.
+# Replace with createFromString() which is the PHP 8.3-compatible equivalent.
+URI_FILE="$APP_DIR/vendor/laravel/framework/src/Illuminate/Support/Uri.php"
+if [ -f "$URI_FILE" ] && grep -q 'LeagueUri::new(' "$URI_FILE"; then
+  sed -i 's/LeagueUri::new(/LeagueUri::createFromString(/g' "$URI_FILE"
+  echo "✓ Patched Uri.php: LeagueUri::new() → LeagueUri::createFromString()"
+fi
+
+# Re-run package discovery now that the syntax is fixed
+"$PHP_BIN" artisan package:discover --ansi 2>&1 || true
 
 # ── .env ─────────────────────────────────────────────────────────
 if [ ! -f .env ]; then

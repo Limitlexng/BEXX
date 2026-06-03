@@ -58,6 +58,7 @@
         ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php -r \"$f='vendor/laravel/framework/src/Illuminate/Support/Uri.php'; if(file_exists($f)){$c=file_get_contents($f); if(str_contains($c,'LeagueUri::new(')){file_put_contents($f,str_replace('LeagueUri::new(','LeagueUri::createFromString(',$c));echo 'Uri.php patched for PHP 8.3'.PHP_EOL;}}\"",
             "@php artisan package:discover --ansi"
         ],
         "post-update-cmd": [
