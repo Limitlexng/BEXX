@@ -1,122 +1,122 @@
 #!/usr/bin/env bash
-# Remote setup script — runs ON the server, no escaping issues
+# Runs ON the server — fixes the PHP version issue and completes deployment
 set -e
 
+PUBLIC_HTML="$HOME/domains/deliverypartner.gocartlex.com/public_html"
 APP_DIR="$HOME/cartlex_app"
-PUBLIC_HTML="$HOME/public_html"
+DOMAIN="deliverypartner.gocartlex.com"
 
-echo "▶ Extracting files..."
-mkdir -p "$APP_DIR"
-tar -xzf ~/cartlex_deploy.tar.gz -C "$APP_DIR" --overwrite
-rm ~/cartlex_deploy.tar.gz
+# ── Find correct PHP 8.2+ binary ─────────────────────────────────
+find_php() {
+  for bin in php8.4 php8.3 php8.2 \
+    /usr/local/lsws/lsphp83/bin/php \
+    /usr/local/lsws/lsphp82/bin/php \
+    /opt/alt/php83/usr/bin/php \
+    /opt/alt/php82/usr/bin/php \
+    /usr/bin/php8.3 /usr/bin/php8.2; do
+    if command -v "$bin" >/dev/null 2>&1 || [ -x "$bin" ]; then
+      VER=$("$bin" -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
+      if [ "$(echo "$VER 8.2" | awk '{print ($1 >= $2)}')" = "1" ]; then
+        echo "$bin"; return
+      fi
+    fi
+  done
+  # Last resort: current php if >= 8.2
+  VER=$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null)
+  if [ "$(echo "$VER 8.2" | awk '{print ($1 >= $2)}')" = "1" ]; then
+    echo "php"; return
+  fi
+  echo ""; return
+}
+
+PHP_BIN=$(find_php)
+if [ -z "$PHP_BIN" ]; then
+  echo "ERROR: No PHP 8.2+ found. Please set PHP 8.3 in hPanel → PHP Configuration, then re-run."
+  exit 1
+fi
+echo "Using PHP: $PHP_BIN ($($PHP_BIN -r 'echo PHP_VERSION;'))"
+
+# ── Clone or update app ───────────────────────────────────────────
+if [ ! -d "$APP_DIR/.git" ]; then
+  echo "Cloning from GitHub..."
+  rm -rf "$APP_DIR"
+  git clone --depth=1 --branch main https://github.com/Limitlexng/BEXX.git "$APP_DIR"
+else
+  echo "Updating from GitHub..."
+  cd "$APP_DIR" && git fetch --depth=1 origin main && git reset --hard origin/main
+fi
 
 cd "$APP_DIR"
 
-# ── Composer ──────────────────────────────────────────────────────
-echo "▶ Installing PHP dependencies..."
-composer install --no-dev --optimize-autoloader --no-interaction --ignore-platform-reqs 2>&1 | tail -5
+# ── Composer install via correct PHP ─────────────────────────────
+echo "Installing PHP dependencies..."
+COMPOSER_BIN=$(command -v composer || command -v composer2 || echo composer)
+"$PHP_BIN" "$COMPOSER_BIN" install \
+  --no-dev --optimize-autoloader --no-interaction \
+  --no-progress --ignore-platform-reqs 2>&1 | tail -5
 
-# ── .env ──────────────────────────────────────────────────────────
-echo "▶ Setting up .env..."
+# ── .env ─────────────────────────────────────────────────────────
 if [ ! -f .env ]; then
   cp .env.example .env
-  # Force production settings
-  sed -i "s|APP_ENV=.*|APP_ENV=production|" .env
-  sed -i "s|APP_DEBUG=.*|APP_DEBUG=false|" .env
-  # Remove old DB lines and append correct SQLite config
-  grep -v "^DB_" .env > /tmp/.env_nodbs && mv /tmp/.env_nodbs .env
-  printf '\nDB_CONNECTION=sqlite\nDB_DATABASE=%s/database/database.sqlite\n' "$APP_DIR" >> .env
-  printf 'SESSION_DRIVER=file\nCACHE_STORE=file\nQUEUE_CONNECTION=sync\n' >> .env
-  printf 'LOG_CHANNEL=single\nLOG_LEVEL=error\n' >> .env
-  php artisan key:generate --force
 fi
+sed -i "s|APP_ENV=.*|APP_ENV=production|" .env
+sed -i "s|APP_DEBUG=.*|APP_DEBUG=false|" .env
+sed -i "s|APP_URL=.*|APP_URL=https://$DOMAIN|" .env
+grep -v "^DB_CONNECTION\|^DB_DATABASE\|^DB_HOST\|^DB_PORT\|^DB_USERNAME\|^DB_PASSWORD\|^SESSION_DRIVER\|^CACHE_STORE\|^QUEUE_CONNECTION\|^LOG_CHANNEL\|^LOG_LEVEL" .env > /tmp/.env_clean
+mv /tmp/.env_clean .env
+cat >> .env <<ENVBLOCK
+DB_CONNECTION=sqlite
+DB_DATABASE=$APP_DIR/database/database.sqlite
+SESSION_DRIVER=file
+CACHE_STORE=file
+QUEUE_CONNECTION=sync
+LOG_CHANNEL=single
+LOG_LEVEL=error
+ENVBLOCK
+"$PHP_BIN" artisan key:generate --force
 
 # ── Database ──────────────────────────────────────────────────────
-echo "▶ Setting up database..."
 touch database/database.sqlite
 chmod 664 database/database.sqlite
 chmod -R 775 storage bootstrap/cache
-
-php artisan migrate --force --no-interaction
-
-USER_COUNT=$(php artisan tinker --execute="echo App\Models\User::count();" 2>/dev/null | grep -o '[0-9]*' | tail -1)
-if [ -z "$USER_COUNT" ] || [ "$USER_COUNT" = "0" ]; then
-  echo "▶ Seeding demo data..."
-  php artisan db:seed --force --no-interaction
+"$PHP_BIN" artisan migrate --force --no-interaction
+COUNT=$("$PHP_BIN" artisan tinker --execute="echo App\Models\User::count();" 2>/dev/null | grep -o '[0-9]*' | tail -1)
+if [ -z "$COUNT" ] || [ "$COUNT" = "0" ]; then
+  "$PHP_BIN" artisan db:seed --force --no-interaction
 fi
 
 # ── Cache ─────────────────────────────────────────────────────────
-echo "▶ Caching for production..."
-php artisan config:cache
-php artisan route:cache
-php artisan view:cache
-php artisan storage:link --force 2>/dev/null || true
+"$PHP_BIN" artisan config:cache
+"$PHP_BIN" artisan route:cache
+"$PHP_BIN" artisan view:cache
+"$PHP_BIN" artisan storage:link --force 2>/dev/null || true
 
 # ── Wire up public_html ───────────────────────────────────────────
-echo "▶ Wiring up public_html..."
-
-# Write a PHP patcher script to a file (avoids all shell quoting issues)
-cat > /tmp/patch_index.php << 'PHPSCRIPT'
-<?php
-$appDir  = getenv('HOME') . '/cartlex_app';
-$pubDir  = getenv('HOME') . '/public_html';
-
-$src = file_get_contents($appDir . '/public/index.php');
-if ($src === false) {
-    echo "ERROR: Could not read $appDir/public/index.php\n";
-    exit(1);
-}
-
-$find = [
-    "__DIR__.'/../vendor/autoload.php'",
-    "__DIR__.'/../bootstrap/app.php'",
-    "__DIR__.'/../storage/framework/maintenance.php'",
-];
-$replace = [
-    "'{$appDir}/vendor/autoload.php'",
-    "'{$appDir}/bootstrap/app.php'",
-    "'{$appDir}/storage/framework/maintenance.php'",
-];
-
-$patched = str_replace($find, $replace, $src);
-
-if (file_put_contents($pubDir . '/index.php', $patched) === false) {
-    echo "ERROR: Could not write to $pubDir/index.php\n";
-    exit(1);
-}
-echo "✓ index.php patched\n";
-PHPSCRIPT
-
-php /tmp/patch_index.php
-rm /tmp/patch_index.php
-
-# Copy .htaccess
+mkdir -p "$PUBLIC_HTML"
+"$PHP_BIN" -r "
+  \$appDir = '$APP_DIR';
+  \$pubDir = '$PUBLIC_HTML';
+  \$src    = file_get_contents(\$appDir . '/public/index.php');
+  \$find   = [\"__DIR__.'/../vendor/autoload.php'\", \"__DIR__.'/../bootstrap/app.php'\", \"__DIR__.'/../storage/framework/maintenance.php'\"];
+  \$rep    = [\"'\$appDir/vendor/autoload.php'\", \"'\$appDir/bootstrap/app.php'\", \"'\$appDir/storage/framework/maintenance.php'\"];
+  file_put_contents(\$pubDir . '/index.php', str_replace(\$find, \$rep, \$src));
+  echo 'index.php written' . PHP_EOL;
+"
 cp public/.htaccess "$PUBLIC_HTML/.htaccess"
-echo "✓ .htaccess copied"
-
-# Copy built assets
 cp -rf public/build "$PUBLIC_HTML/"
-echo "✓ Build assets copied"
+[ -d storage/app/public ] && cp -rf storage/app/public "$PUBLIC_HTML/storage" || true
 
-# Copy public storage if any
-if [ -d storage/app/public ]; then
-  cp -rf storage/app/public "$PUBLIC_HTML/storage"
-fi
-
-# ── Verify ────────────────────────────────────────────────────────
+# ── Sanity check ─────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Deploy complete!"
-echo "  App dir : $APP_DIR"
-echo "  Web root: $PUBLIC_HTML"
+echo " Deployment complete!"
+echo " PHP:    $PHP_BIN ($($PHP_BIN -r 'echo PHP_VERSION;'))"
+echo " App:    $APP_DIR"
+echo " Web:    $PUBLIC_HTML"
+[ -f "$PUBLIC_HTML/index.php" ] && echo " index:  ✓ $(wc -c < "$PUBLIC_HTML/index.php") bytes" || echo " index:  ✗ MISSING"
+[ -f "$APP_DIR/vendor/autoload.php" ] && echo " vendor: ✓" || echo " vendor: ✗ MISSING"
+[ -f "$APP_DIR/database/database.sqlite" ] && echo " db:     ✓ $(wc -c < "$APP_DIR/database/database.sqlite") bytes" || echo " db:     ✗"
 echo ""
-echo "  Checking index.php..."
-if [ -f "$PUBLIC_HTML/index.php" ]; then
-  echo "  ✓ public_html/index.php exists ($(wc -c < "$PUBLIC_HTML/index.php") bytes)"
-  head -3 "$PUBLIC_HTML/index.php"
-else
-  echo "  ✗ public_html/index.php MISSING!"
-fi
+echo " https://deliverypartner.gocartlex.com"
+echo " Login:  admin@gocartlex.com / Cartlex@2025!"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "  Login: admin@gocartlex.com / Cartlex@2025!"
