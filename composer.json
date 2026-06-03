@@ -15,7 +15,7 @@
         "livewire/livewire": "^4.3",
         "maatwebsite/excel": "^3.1",
         "simplesoftwareio/simple-qrcode": "^4.2",
-        "spatie/laravel-activitylog": "^5.0",
+        "spatie/laravel-activitylog": "^4.0",
         "spatie/laravel-permission": "^8.0"
     },
     "require-dev": {
@@ -58,7 +58,6 @@
         ],
         "post-autoload-dump": [
             "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
-            "@php -r \"$f='vendor/laravel/framework/src/Illuminate/Support/Uri.php'; if(file_exists($f)){$c=file_get_contents($f); if(str_contains($c,'LeagueUri::new(')){file_put_contents($f,str_replace('LeagueUri::new(','LeagueUri::createFromString(',$c));echo 'Uri.php patched for PHP 8.3'.PHP_EOL;}}\"",
             "@php artisan package:discover --ansi"
         ],
         "post-update-cmd": [
@@ -85,6 +84,9 @@
         "optimize-autoloader": true,
         "preferred-install": "dist",
         "sort-packages": true,
+        "platform": {
+            "php": "8.3.30"
+        },
         "allow-plugins": {
             "pestphp/pest-plugin": true,
             "php-http/discovery": true
